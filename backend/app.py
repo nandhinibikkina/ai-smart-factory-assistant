@@ -2,7 +2,7 @@ import os
 import sys
 import threading
 import time
-from flask import Flask, jsonify
+from flask import Flask, jsonify, send_from_directory
 from flask_cors import CORS
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -33,37 +33,70 @@ app.register_blueprint(maintenance_bp)
 app.register_blueprint(energy_bp)
 app.register_blueprint(incident_bp)
 
-@app.route('/api/health')
+@app.route('/api/health', methods=['GET', 'HEAD'], strict_slashes=False)
+@app.route('/health', methods=['GET', 'HEAD'], strict_slashes=False)
 def health():
-    return jsonify({"status": "online", "mode": "backend"})
-
-@app.route('/')
-def index():
     return jsonify({
-        "status": "online",
-        "app": "AI Smart Factory Assistant Backend API",
-        "version": "2.0.0",
-        "endpoints": [
-            "/api/machines",
-            "/api/machines/<id>",
-            "/api/machines/trigger-anomaly",
-            "/api/machines/reset-simulation",
-            "/api/alerts",
-            "/api/alerts/<id>/resolve",
-            "/api/production",
-            "/api/ai/chat",
-            "/api/simulator/analyze",
-            "/api/demo/step",
-            "/api/demo/reset",
-            "/api/maintenance",
-            "/api/maintenance/schedule",
-            "/api/maintenance/<id>/complete",
-            "/api/energy"
-        ]
-    })
+        "status": "healthy",
+        "online": True,
+        "mode": "production",
+        "app": "AI Smart Factory Assistant",
+        "version": "2.0.0"
+    }), 200
+
+dist_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'frontend', 'dist'))
+
+@app.route('/', defaults={'path': ''})
+@app.route('/<path:path>')
+def serve_frontend(path):
+    # Normalize path
+    clean_path = path.strip('/')
+    if clean_path in ('api/health', 'health'):
+        return health()
+
+    # Don't hijack undefined /api routes
+    if clean_path.startswith('api'):
+        return jsonify({"success": False, "error": f"API endpoint '/{path}' not found"}), 404
+
+    # Serve static assets if file exists in dist
+    if path != "" and os.path.exists(os.path.join(dist_dir, path)):
+        return send_from_directory(dist_dir, path)
+    # Serve index.html for client-side routing (SPA fallback)
+    elif os.path.exists(os.path.join(dist_dir, 'index.html')):
+        return send_from_directory(dist_dir, 'index.html')
+    else:
+        # Fallback API information when frontend is not built
+        return jsonify({
+            "status": "online",
+            "app": "AI Smart Factory Assistant Backend API",
+            "version": "2.0.0",
+            "endpoints": [
+                "/api/machines",
+                "/api/machines/<id>",
+                "/api/machines/trigger-anomaly",
+                "/api/machines/reset-simulation",
+                "/api/alerts",
+                "/api/alerts/<id>/resolve",
+                "/api/production",
+                "/api/ai/chat",
+                "/api/simulator/analyze",
+                "/api/demo/step",
+                "/api/demo/reset",
+                "/api/maintenance",
+                "/api/maintenance/schedule",
+                "/api/maintenance/<id>/complete",
+                "/api/energy"
+            ]
+        })
 
 # Background sensor telemetry simulator thread
+_simulation_started = False
 def start_background_simulation():
+    global _simulation_started
+    if _simulation_started:
+        return
+    _simulation_started = True
+
     def run_sim():
         while True:
             time.sleep(10) # Tick simulation every 10 seconds
@@ -76,9 +109,14 @@ def start_background_simulation():
     t.start()
     print("Background machine sensor simulator started.")
 
+_initialized = False
 def initialize_application():
+    global _initialized
+    if _initialized:
+        return
+    _initialized = True
+
     init_db()
-    db_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'database', 'factory.db')
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT COUNT(*) as count FROM machines")
@@ -98,7 +136,10 @@ def initialize_application():
 
     start_background_simulation()
 
+# Initialize application when module is imported (ensures Gunicorn in Cloud Run starts properly)
+initialize_application()
+
 if __name__ == '__main__':
-    initialize_application()
-    print("AI Smart Factory Assistant Backend listening on port 5000...")
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    port = int(os.environ.get('PORT', 5000))
+    print(f"AI Smart Factory Assistant Backend listening on port {port}...")
+    app.run(host='0.0.0.0', port=port, debug=True)
