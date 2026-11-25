@@ -139,9 +139,25 @@ def init_db():
             root_cause TEXT,
             confidence TEXT DEFAULT 'High',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            resolved_at TEXT,
+            resolved_by TEXT,
+            resolution_notes TEXT,
+            resolution_duration TEXT,
             FOREIGN KEY (machine_id) REFERENCES machines (id)
         )
     ''')
+
+    # Migration check for incidents table extra columns
+    cursor.execute("PRAGMA table_info(incidents)")
+    columns = [row[1] for row in cursor.fetchall()]
+    if 'resolved_at' not in columns:
+        cursor.execute("ALTER TABLE incidents ADD COLUMN resolved_at TEXT")
+    if 'resolved_by' not in columns:
+        cursor.execute("ALTER TABLE incidents ADD COLUMN resolved_by TEXT")
+    if 'resolution_notes' not in columns:
+        cursor.execute("ALTER TABLE incidents ADD COLUMN resolution_notes TEXT")
+    if 'resolution_duration' not in columns:
+        cursor.execute("ALTER TABLE incidents ADD COLUMN resolution_duration TEXT")
     
     conn.commit()
     conn.close()

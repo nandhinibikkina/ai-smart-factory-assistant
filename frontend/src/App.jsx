@@ -322,7 +322,7 @@ export default function App() {
               />
               <Route
                 path="/simulator"
-                element={<WhatIfSimulator />}
+                element={<WhatIfSimulator machines={machines} onRefreshData={loadData} />}
               />
               <Route
                 path="/pricing"

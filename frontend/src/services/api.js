@@ -51,22 +51,22 @@ export async function fetchMachineDetails(machineId) {
   }
 }
 
-export async function triggerMachineAnomaly(machineId = 'MCH-003', anomalyType = 'Combined Anomaly') {
+export async function triggerMachineAnomaly(machineId = 'MCH-003', anomalyType = 'Combined Anomaly', severity = 'Critical') {
   if (isOfflineActive()) {
-    return { ...offlineStore.triggerAnomaly(machineId, anomalyType), is_offline: true };
+    return { ...offlineStore.triggerAnomaly(machineId, anomalyType, severity), is_offline: true };
   }
   try {
     const res = await fetch(`${API_BASE}/machines/trigger-anomaly`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ machine_id: machineId, anomaly_type: anomalyType })
+      body: JSON.stringify({ machine_id: machineId, anomaly_type: anomalyType, severity: severity })
     });
     if (!res.ok) throw new Error('Failed to trigger anomaly');
     const data = await res.json();
     return { ...data, is_offline: false };
   } catch (err) {
     console.warn('Network API unreachable. Falling back to Edge Store:', err.message);
-    return { ...offlineStore.triggerAnomaly(machineId, anomalyType), is_offline: true };
+    return { ...offlineStore.triggerAnomaly(machineId, anomalyType, severity), is_offline: true };
   }
 }
 
@@ -174,6 +174,9 @@ export async function sendAIChatQuery(question) {
 }
 
 export async function analyzeScenario(scenarioData) {
+  if (isOfflineActive()) {
+    return { ...offlineStore.analyzeScenario(scenarioData), is_offline: true };
+  }
   try {
     const res = await fetch(`${API_BASE}/simulator/analyze`, {
       method: 'POST',
@@ -184,17 +187,27 @@ export async function analyzeScenario(scenarioData) {
     const data = await res.json();
     return { ...data, is_offline: false };
   } catch (err) {
-    return {
-      success: true,
-      is_offline: true,
-      simulation_results: {
-        scenario_name: scenarioData.scenario_name || 'Edge What-If Simulation',
-        predicted_oee: 84.5,
-        predicted_downtime_hours: 2.1,
-        risk_level: 'Moderate',
-        recommendation: 'Simulation processed locally using Edge Predictive Rules.'
-      }
-    };
+    console.warn('Network API unreachable. Falling back to Edge Store:', err.message);
+    return { ...offlineStore.analyzeScenario(scenarioData), is_offline: true };
+  }
+}
+
+export async function applySimulatorScenario(scenarioData) {
+  if (isOfflineActive()) {
+    return { ...offlineStore.applyScenario(scenarioData.machine_id, scenarioData), is_offline: true };
+  }
+  try {
+    const res = await fetch(`${API_BASE}/simulator/apply`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(scenarioData)
+    });
+    if (!res.ok) throw new Error('Failed to apply simulation scenario');
+    const data = await res.json();
+    return { ...data, is_offline: false };
+  } catch (err) {
+    console.warn('Network API unreachable. Falling back to Edge Store:', err.message);
+    return { ...offlineStore.applyScenario(scenarioData.machine_id, scenarioData), is_offline: true };
   }
 }
 
@@ -351,21 +364,40 @@ export async function fetchIncidentDetails(id) {
   }
 }
 
-export async function updateIncidentStatus(id, status) {
+export async function updateIncidentStatus(id, status, payload = {}) {
   if (isOfflineActive()) {
-    return { ...offlineStore.updateIncidentStatus(id, status), is_offline: true };
+    return { ...offlineStore.updateIncidentStatus(id, status, payload), is_offline: true };
   }
   try {
     const res = await fetch(`${API_BASE}/incidents/${id}/status`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status })
+      body: JSON.stringify({ status, ...payload })
     });
     if (!res.ok) throw new Error(`Failed to update incident ${id} status`);
     const data = await res.json();
     return { ...data, is_offline: false };
   } catch (err) {
     console.warn('Network API unreachable. Falling back to Edge Store:', err.message);
-    return { ...offlineStore.updateIncidentStatus(id, status), is_offline: true };
+    return { ...offlineStore.updateIncidentStatus(id, status, payload), is_offline: true };
+  }
+}
+
+export async function resolveIncident(id, payload = {}) {
+  if (isOfflineActive()) {
+    return { ...offlineStore.resolveIncident(id, payload), is_offline: true };
+  }
+  try {
+    const res = await fetch(`${API_BASE}/incidents/${id}/resolve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) throw new Error(`Failed to resolve incident ${id}`);
+    const data = await res.json();
+    return { ...data, is_offline: false };
+  } catch (err) {
+    console.warn('Network API unreachable. Falling back to Edge Store:', err.message);
+    return { ...offlineStore.resolveIncident(id, payload), is_offline: true };
   }
 }

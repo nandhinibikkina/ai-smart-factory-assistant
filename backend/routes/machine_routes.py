@@ -83,14 +83,15 @@ def trigger_anomaly():
     data = request.get_json() or {}
     machine_id = data.get('machine_id', 'MCH-003')
     anomaly_type = data.get('anomaly_type', 'Combined Anomaly')
+    severity = data.get('severity', 'Critical')
     
-    result = inject_machine_anomaly(machine_id, anomaly_type)
+    result = inject_machine_anomaly(machine_id, anomaly_type, severity)
     if "error" in result:
         return jsonify({"success": False, "error": result["error"]}), 400
 
     return jsonify({
         "success": True, 
-        "message": f"Anomaly '{anomaly_type}' injected for {result['machine_name']}", 
+        "message": f"Anomaly '{anomaly_type}' ({result.get('severity', severity)}) injected for {result['machine_name']}", 
         "result": result
     })
 

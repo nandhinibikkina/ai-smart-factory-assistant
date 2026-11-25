@@ -120,7 +120,30 @@ const INITIAL_ALERTS = [
   }
 ];
 
-const INITIAL_INCIDENTS = [];
+const INITIAL_INCIDENTS = [
+  {
+    id: "INC-003",
+    machine_id: "MCH-003",
+    machine_name: "Machine 03 - Packaging Unit",
+    anomaly_type: "Combined Anomaly",
+    severity: "Critical",
+    risk_score: 89,
+    status: "Investigation Required",
+    created_at: new Date(Date.now() - 18 * 60 * 1000).toLocaleString(),
+    telemetry: { temperature: 88.5, vibration: 6.2, pressure: 128.4 }
+  },
+  {
+    id: "INC-004",
+    machine_id: "MCH-004",
+    machine_name: "Machine 04 - Welding Unit",
+    anomaly_type: "High Temperature",
+    severity: "Warning",
+    risk_score: 58,
+    status: "Investigation Required",
+    created_at: new Date(Date.now() - 70 * 60 * 1000).toLocaleString(),
+    telemetry: { temperature: 79.8, vibration: 3.8, pressure: 114.2 }
+  }
+];
 const INITIAL_MAINTENANCE = [
   {
     id: "WO-901",
@@ -339,30 +362,101 @@ export const offlineStore = {
     };
   },
 
-  updateIncidentStatus(id, newStatus) {
+  updateIncidentStatus(id, newStatus, payload = {}) {
+    if (newStatus === 'Resolved') {
+      return this.resolveIncident(id, payload);
+    }
     const incidents = this.getIncidents().map(i => i.id === id ? { ...i, status: newStatus } : i);
     saveStorage(STORAGE_KEYS.INCIDENTS, incidents);
     return { success: true, incident_id: id, status: newStatus };
   },
 
-  triggerAnomaly(machineId = 'MCH-003', anomalyType = 'Combined Anomaly') {
+  resolveIncident(id, payload = {}) {
+    const incidents = this.getIncidents();
+    const idx = incidents.findIndex(i => i.id === id);
+    if (idx === -1) return { success: false, error: 'Incident not found' };
+
+    const inc = incidents[idx];
+    const now = new Date();
+    const resolved_at = now.toLocaleString();
+    const resolved_by = payload.resolved_by || 'Alex Chen (Lead Operations Specialist)';
+    const resolution_notes = payload.resolution_notes || 'Incident investigated and resolved. Operating baseline verified.';
+    
+    let duration_str = '12 mins';
+    if (inc.created_at) {
+      try {
+        const created_dt = new Date(inc.created_at);
+        const diff_mins = Math.max(1, Math.floor((now - created_dt) / (1000 * 60)));
+        if (!isNaN(diff_mins)) {
+          duration_str = diff_mins < 60 ? `${diff_mins} mins` : `${Math.floor(diff_mins / 60)}h ${diff_mins % 60}m`;
+        }
+      } catch (e) {}
+    }
+
+    inc.status = 'Resolved';
+    inc.resolved_at = resolved_at;
+    inc.resolved_by = resolved_by;
+    inc.resolution_notes = resolution_notes;
+    inc.resolution_duration = duration_str;
+
+    incidents[idx] = inc;
+    saveStorage(STORAGE_KEYS.INCIDENTS, incidents);
+
+    if (payload.restore_machine !== false) {
+      this.resetSingleMachine(inc.machine_id);
+      const alerts = this.getAlerts().map(a => a.machine_id === inc.machine_id ? { ...a, status: 'Resolved' } : a);
+      saveStorage(STORAGE_KEYS.ALERTS, alerts);
+    }
+
+    return {
+      success: true,
+      incident_id: id,
+      status: 'Resolved',
+      resolved_at,
+      resolved_by,
+      resolution_notes,
+      resolution_duration: duration_str
+    };
+  },
+
+  triggerAnomaly(machineId = 'MCH-003', anomalyType = 'Combined Anomaly', severity = 'Critical') {
     const machines = this.getMachines();
-    const targetIdx = machines.findIndex(m => m.id === machineId);
+    const targetIdx = machines.findIndex(m => m.id === machineId || m.id?.toLowerCase() === (machineId || '').toLowerCase());
     if (targetIdx === -1) return { success: false, error: 'Machine not found' };
 
     const target = machines[targetIdx];
+    const target_severity = (severity && (severity === 'Warning' || severity === 'Critical')) ? severity : 'Critical';
+
     let newTemp = target.temperature;
     let newVib = target.vibration;
     let newPress = target.pressure;
 
-    if (anomalyType === 'High Temperature') newTemp = 88.5;
-    else if (anomalyType === 'High Vibration') newVib = 4.8;
-    else if (anomalyType === 'Abnormal Pressure') newPress = 142.0;
-    else if (anomalyType === 'Increasing Trend') { newTemp = 74.0; newVib = 3.2; }
-    else if (anomalyType === 'Combined Anomaly') { newTemp = 91.2; newVib = 5.6; newPress = 148.5; }
-    else { newTemp = 82.0; newVib = 4.1; }
+    const atype = str(anomalyType).toLowerCase();
 
-    const { risk_score, status } = calculateEdgeRiskScore(newTemp, newVib, newPress, target.operating_hours, anomalyType);
+    if (atype.includes('temperature') || atype.includes('temp')) {
+      newTemp = target_severity === 'Warning' ? 79.5 : 89.5;
+      newVib = 2.2;
+      newPress = 101.0;
+    } else if (atype.includes('vibration') || atype.includes('vib')) {
+      newTemp = 68.0;
+      newVib = target_severity === 'Warning' ? 4.2 : 6.8;
+      newPress = 100.0;
+    } else if (atype.includes('pressure') || atype.includes('press')) {
+      newTemp = 70.0;
+      newVib = 2.4;
+      newPress = target_severity === 'Warning' ? 121.0 : 138.0;
+    } else if (atype.includes('trend')) {
+      newTemp = target_severity === 'Warning' ? 77.0 : 88.5;
+      newVib = target_severity === 'Warning' ? 3.8 : 6.2;
+      newPress = target_severity === 'Warning' ? 118.0 : 128.0;
+    } else { // Combined
+      newTemp = target_severity === 'Warning' ? 79.0 : 91.2;
+      newVib = target_severity === 'Warning' ? 4.0 : 5.8;
+      newPress = target_severity === 'Warning' ? 120.0 : 138.0;
+    }
+
+    const risk_score = target_severity === 'Warning' ? 55 : 88;
+    const status = target_severity;
 
     target.temperature = newTemp;
     target.vibration = newVib;
@@ -376,29 +470,32 @@ export const offlineStore = {
     saveStorage(STORAGE_KEYS.MACHINES, machines);
 
     // Create Alert
-    const alerts = this.getAlerts();
+    const alerts = this.getAlerts().filter(a => a.machine_id !== target.id);
     const newAlert = {
       id: `ALT-OFF-${Date.now().toString().slice(-4)}`,
       machine_id: target.id,
       machine_name: target.name,
-      severity: status === 'Critical' ? 'Critical' : 'Warning',
+      severity: status,
       type: `${anomalyType} Detected`,
-      title: `${target.name} Anomaly`,
-      message: `Edge Engine: ${anomalyType} detected on ${target.name}. Risk Score: ${risk_score}/100.`,
+      title: `${target.name} ${status} Anomaly`,
+      message: `Edge Engine: ${anomalyType} (${status}) detected on ${target.name}. Risk Score: ${risk_score}/100.`,
       timestamp: new Date().toLocaleString(),
       status: 'Active'
     };
     alerts.unshift(newAlert);
     saveStorage(STORAGE_KEYS.ALERTS, alerts);
 
-    // Create Incident
-    const incidents = this.getIncidents();
+    // Create Incident with stable ID
+    const m_num = target.id.split('-')[-1] || '001';
+    const incident_id = `INC-${m_num}`;
+
+    let incidents = this.getIncidents().filter(i => i.id !== incident_id);
     const newIncident = {
-      id: `INC-OFF-${Date.now().toString().slice(-4)}`,
+      id: incident_id,
       machine_id: target.id,
       machine_name: target.name,
       anomaly_type: anomalyType,
-      severity: status === 'Critical' ? 'Critical' : 'Warning',
+      severity: status,
       risk_score: risk_score,
       status: 'Investigation Required',
       created_at: new Date().toLocaleString(),
@@ -412,17 +509,19 @@ export const offlineStore = {
     logs.unshift({
       id: `LOG-${Date.now().toString().slice(-4)}`,
       machine_name: target.name,
-      message: `[EDGE ENGINE] ${anomalyType} injected on ${target.name} (Risk: ${risk_score}).`,
+      message: `[EDGE ENGINE] ${anomalyType} (${status}) injected on ${target.name} (Incident #${incident_id}).`,
       timestamp: new Date().toLocaleString()
     });
     saveStorage(STORAGE_KEYS.LOGS, logs);
 
     return {
       success: true,
-      message: `Edge Engine: Anomaly injected on ${target.name}`,
+      message: `Edge Engine: ${status}-level anomaly injected on ${target.name}`,
       machine: target,
       risk_score,
       status,
+      severity: status,
+      incident_id,
       is_edge: true
     };
   },
@@ -519,6 +618,106 @@ export const offlineStore = {
         { machine_id: 'MCH-005', kwh: 110.8, status: 'Normal' },
         { machine_id: 'MCH-006', kwh: 103.9, status: 'Normal' }
       ]
+    };
+  },
+
+  analyzeScenario(scenarioData = {}) {
+    const machines = this.getMachines();
+    const searchId = (scenarioData.machine_id || 'MCH-001').toString().trim().toLowerCase();
+    const m = machines.find(x => 
+      x.id.toLowerCase() === searchId || 
+      x.id.replace('-', '').toLowerCase() === searchId.replace('-', '') ||
+      x.name.toLowerCase().includes(searchId)
+    ) || machines[0];
+
+    const temp = Number(scenarioData.temperature ?? m.temperature);
+    const vib = Number(scenarioData.vibration ?? m.vibration);
+    const press = Number(scenarioData.pressure ?? m.pressure);
+    const hours = Number(scenarioData.operating_hours ?? m.operating_hours);
+
+    const baseline_temp = Number(scenarioData.baseline_temperature ?? m.temperature);
+    const baseline_vib = Number(scenarioData.baseline_vibration ?? m.vibration);
+    const baseline_press = Number(scenarioData.baseline_pressure ?? m.pressure);
+    const baseline_hours = Number(scenarioData.baseline_hours ?? m.operating_hours);
+
+    const calcEdgeFactors = (t, v, p, h) => {
+      const factors = [];
+      if (t > 85) factors.push(`Critical Temperature (${t.toFixed(1)}°C > 85.0°C limit)`);
+      else if (t > 70) factors.push(`High Temperature (${t.toFixed(1)}°C > 70.0°C limit)`);
+      if (v > 5.0) factors.push(`Critical Vibration (${v.toFixed(2)} mm/s > 5.0 mm/s limit)`);
+      else if (v > 3.5) factors.push(`High Vibration (${v.toFixed(2)} mm/s > 3.5 mm/s limit)`);
+      if (p > 130) factors.push(`Critical Pressure (${p.toFixed(1)} PSI > 130.0 PSI limit)`);
+      else if (p > 115) factors.push(`Elevated Pressure (${p.toFixed(1)} PSI)`);
+      if (h > 3000) factors.push(`Operating Hours (${h} hrs > 3,000 hrs threshold)`);
+      if (factors.length === 0) factors.push('All parameters within baseline operating range.');
+      return factors;
+    };
+
+    const baseCalc = calculateEdgeRiskScore(baseline_temp, baseline_vib, baseline_press, baseline_hours);
+    const simCalc = calculateEdgeRiskScore(temp, vib, press, hours);
+
+    const baseline_risk = {
+      risk_score: baseCalc.risk_score,
+      risk_level: baseCalc.status === 'Critical' ? 'CRITICAL' : baseCalc.status === 'Warning' ? 'MEDIUM' : 'LOW',
+      status: baseCalc.status,
+      factors: calcEdgeFactors(baseline_temp, baseline_vib, baseline_press, baseline_hours)
+    };
+
+    const simulated_risk = {
+      risk_score: simCalc.risk_score,
+      risk_level: simCalc.status === 'Critical' ? 'CRITICAL' : simCalc.status === 'Warning' ? 'MEDIUM' : 'LOW',
+      status: simCalc.status,
+      factors: calcEdgeFactors(temp, vib, press, hours)
+    };
+
+    const delta_score = simulated_risk.risk_score - baseline_risk.risk_score;
+    let explanation = `Edge Simulation for ${m.name}: Risk Score ${simulated_risk.risk_score}/100 (${simulated_risk.risk_level}). `;
+    if (delta_score > 0) explanation += `Risk score increased by +${delta_score} pts due to elevated parameters.`;
+    else if (delta_score < 0) explanation += `Risk score decreased by ${Math.abs(delta_score)} pts towards baseline.`;
+    else explanation += `Risk score remains identical to baseline condition.`;
+
+    return {
+      success: true,
+      machine_id: m.id,
+      machine_name: m.name,
+      baseline_risk,
+      simulated_risk,
+      delta_score,
+      explanation,
+      is_edge: true
+    };
+  },
+
+  applyScenario(machineId, telemetryData = {}) {
+    const machines = this.getMachines();
+    const idx = machines.findIndex(x => x.id === machineId || x.id.toLowerCase() === machineId.toLowerCase());
+    if (idx === -1) return { success: false, error: 'Machine not found' };
+
+    const target = machines[idx];
+    const temp = Number(telemetryData.temperature ?? target.temperature);
+    const vib = Number(telemetryData.vibration ?? target.vibration);
+    const press = Number(telemetryData.pressure ?? target.pressure);
+    const hours = Number(telemetryData.operating_hours ?? target.operating_hours);
+
+    const { risk_score, status } = calculateEdgeRiskScore(temp, vib, press, hours);
+
+    target.temperature = temp;
+    target.vibration = vib;
+    target.pressure = press;
+    target.operating_hours = hours;
+    target.risk_score = risk_score;
+    target.status = status;
+
+    machines[idx] = target;
+    saveStorage(STORAGE_KEYS.MACHINES, machines);
+
+    return {
+      success: true,
+      message: `Applied simulation telemetry to ${target.name}.`,
+      machine: target,
+      status,
+      risk_score,
+      is_edge: true
     };
   },
 

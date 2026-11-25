@@ -8,6 +8,8 @@ from database.db import get_db_connection
 from models.risk_model import predict_machine_risk
 from services.maintenance_service import generate_maintenance_recommendations
 
+from services.simulation_service import reset_single_machine_anomaly
+
 incident_bp = Blueprint('incidents', __name__)
 
 BASELINES = {
@@ -115,6 +117,13 @@ def get_incident_details(incident_id):
         {"time": ts, "title": "AI Maintenance Action Plan Generated", "desc": recs[0] if recs else "Inspection recommended."}
     ]
     
+    if inc.get('status') == 'Resolved' and inc.get('resolved_at'):
+        timeline.append({
+            "time": inc.get('resolved_at'),
+            "title": f"Incident Resolved by {inc.get('resolved_by') or 'Engineer'}",
+            "desc": f"Resolution duration: {inc.get('resolution_duration') or 'N/A'}. Notes: {inc.get('resolution_notes') or 'Resolved.'}"
+        })
+
     conn.close()
     
     return jsonify({
@@ -132,14 +141,93 @@ def get_incident_details(incident_id):
         "timeline": timeline
     })
 
+@incident_bp.route('/api/incidents/<incident_id>/resolve', methods=['POST', 'PATCH'])
+def resolve_incident_endpoint(incident_id):
+    data = request.get_json() or {}
+    resolved_by = data.get('resolved_by', 'Alex Chen (Lead Operations Specialist)')
+    resolution_notes = data.get('resolution_notes', 'Incident investigated and resolved. Operating baseline verified.')
+    restore_machine = data.get('restore_machine', True)
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT * FROM incidents WHERE id = ?", (incident_id,))
+    inc_row = cursor.fetchone()
+    if not inc_row:
+        conn.close()
+        return jsonify({"success": False, "error": f"Incident {incident_id} not found."}), 404
+        
+    inc = dict(inc_row)
+    m_id = inc['machine_id']
+    
+    now = datetime.now()
+    resolved_at_str = now.strftime('%Y-%m-%d %H:%M:%S')
+    created_at_str = inc.get('created_at')
+    
+    duration_str = "12 mins"
+    if created_at_str:
+        try:
+            created_dt = datetime.strptime(created_at_str, '%Y-%m-%d %H:%M:%S')
+            diff_mins = max(1, int((now - created_dt).total_seconds() / 60))
+            if diff_mins < 60:
+                duration_str = f"{diff_mins} mins"
+            else:
+                duration_str = f"{diff_mins // 60}h {diff_mins % 60}m"
+        except Exception:
+            duration_str = "12 mins"
+            
+    cursor.execute('''
+        UPDATE incidents
+        SET status = 'Resolved',
+            resolved_at = ?,
+            resolved_by = ?,
+            resolution_notes = ?,
+            resolution_duration = ?
+        WHERE id = ?
+    ''', (resolved_at_str, resolved_by, resolution_notes, duration_str, incident_id))
+    
+    if restore_machine:
+        cursor.execute("UPDATE alerts SET status = 'Resolved' WHERE machine_id = ? AND status = 'Active'", (m_id,))
+        conn.commit()
+        conn.close()
+        reset_single_machine_anomaly(m_id)
+    else:
+        conn.commit()
+        conn.close()
+        
+    conn_log = get_db_connection()
+    cursor_log = conn_log.cursor()
+    cursor_log.execute("INSERT INTO activity_logs (type, machine_name, message) VALUES ('System', ?, ?)",
+                       (inc['machine_name'], f"Incident {incident_id} resolved by {resolved_by}. Duration: {duration_str}."))
+    conn_log.commit()
+    conn_log.close()
+    
+    return jsonify({
+        "success": True,
+        "message": f"Incident {incident_id} marked as Resolved.",
+        "incident_id": incident_id,
+        "status": "Resolved",
+        "resolved_at": resolved_at_str,
+        "resolved_by": resolved_by,
+        "resolution_notes": resolution_notes,
+        "resolution_duration": duration_str
+    })
+
 @incident_bp.route('/api/incidents/<incident_id>/status', methods=['PATCH'])
 def update_incident_status(incident_id):
     data = request.get_json() or {}
     new_status = data.get('status')
+    resolved_by = data.get('resolved_by', 'Operations Lead')
+    resolution_notes = data.get('resolution_notes', 'Investigation completed.')
+    restore_machine = data.get('restore_machine', True)
     
     valid_statuses = ['Investigation Required', 'Under Investigation', 'Maintenance Scheduled', 'Resolved']
     if not new_status or new_status not in valid_statuses:
         return jsonify({"success": False, "error": f"Invalid status. Must be one of: {valid_statuses}"}), 400
+
+    if new_status == 'Resolved':
+        # Delegate to full resolution workflow
+        return resolve_incident_endpoint(incident_id)
         
     conn = get_db_connection()
     cursor = conn.cursor()

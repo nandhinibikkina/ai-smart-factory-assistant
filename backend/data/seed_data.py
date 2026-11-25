@@ -17,6 +17,7 @@ def seed_database():
     cursor.execute("DROP TABLE IF EXISTS activity_logs")
     cursor.execute("DROP TABLE IF EXISTS production_logs")
     cursor.execute("DROP TABLE IF EXISTS factory_summary")
+    cursor.execute("DROP TABLE IF EXISTS incidents")
     conn.commit()
     conn.close()
 
@@ -157,12 +158,20 @@ def seed_database():
         VALUES (?, ?, ?, ?, ?, ?)
     ''', production_records)
     
-    # Factory Summary Record
-    cursor.execute('''
-        INSERT INTO factory_summary (id, target_output, produced_output, efficiency, health_score, downtime_hrs, total_energy_kwh)
-        VALUES (1, 5770, 5140, 89.1, 78, 1.8, 290.2)
-    ''')
-    
+    # Incidents
+    incidents_data = [
+        ("INC-003", "MCH-003", "Machine 03 - Packaging Unit", "Combined Anomaly", "Critical", 89, "Investigation Required", 66.0, 88.5, 1.9, 6.2, 101.0, 128.4, "Thermal Stress & Bearing Anomaly", "High", (now - timedelta(minutes=18)).strftime('%Y-%m-%d %H:%M:%S')),
+        ("INC-004", "MCH-004", "Machine 04 - Welding Unit", "High Temperature", "Warning", 58, "Investigation Required", 68.4, 79.8, 2.1, 3.8, 99.5, 114.2, "Elevated Thermal Level", "High", (now - timedelta(hours=1, minutes=10)).strftime('%Y-%m-%d %H:%M:%S'))
+    ]
+
+    cursor.executemany('''
+        INSERT INTO incidents (
+            id, machine_id, machine_name, anomaly_type, severity, risk_score, status,
+            temp_before, temp_after, vib_before, vib_after, press_before, press_after,
+            root_cause, confidence, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', incidents_data)
+
     conn.commit()
     conn.close()
     print("Database seeded with extended Industry 4.0 sample data.")

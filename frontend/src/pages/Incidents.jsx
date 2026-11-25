@@ -3,9 +3,9 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { 
   Search, ShieldAlert, ArrowRight, CheckCircle2, AlertTriangle, Clock, 
   Wrench, ArrowUpRight, ArrowDownRight, ArrowRightLeft, Sparkles, RefreshCw, 
-  Layers, Bot, CheckSquare, PlusCircle
+  Layers, Bot, CheckSquare, PlusCircle, UserCheck, Calendar, FileText
 } from 'lucide-react';
-import { fetchIncidents, fetchIncidentDetails, updateIncidentStatus, scheduleMaintenance } from '../services/api';
+import { fetchIncidents, fetchIncidentDetails, updateIncidentStatus, resolveIncident, scheduleMaintenance } from '../services/api';
 import { calculateMachineProductionLoss } from '../services/costCalculator';
 
 export default function Incidents({ machines = [], onRefreshData }) {
@@ -33,6 +33,15 @@ export default function Incidents({ machines = [], onRefreshData }) {
   });
   const [submittingWO, setSubmittingWO] = useState(false);
 
+  // Resolution Confirmation Modal State
+  const [isResolutionModalOpen, setIsResolutionModalOpen] = useState(false);
+  const [resolutionData, setResolutionData] = useState({
+    resolved_by: 'Alex Chen (Senior Operations Specialist)',
+    resolution_notes: '',
+    restore_machine: true
+  });
+  const [submittingResolution, setSubmittingResolution] = useState(false);
+
   // Fetch incident list
   const loadIncidents = async () => {
     setLoadingList(true);
@@ -40,11 +49,10 @@ export default function Incidents({ machines = [], onRefreshData }) {
       const res = await fetchIncidents();
       if (res.success && res.incidents) {
         setIncidents(res.incidents);
-        // Select first incident or preselected query match
         if (res.incidents.length > 0) {
           let match = res.incidents.find(i => i.id === preselectedId || i.machine_id === preselectedId);
-          if (!match) match = res.incidents[0];
-          setSelectedIncidentId(match.id);
+          if (!match && !selectedIncidentId) match = res.incidents[0];
+          if (match) setSelectedIncidentId(match.id);
         }
       }
     } catch (err) {
@@ -77,9 +85,13 @@ export default function Incidents({ machines = [], onRefreshData }) {
     loadDetails();
   }, [selectedIncidentId]);
 
-  // Handle status update
+  // Handle status update dropdown / button
   const handleStatusChange = async (newStatus) => {
     if (!selectedIncidentId) return;
+    if (newStatus === 'Resolved') {
+      handleOpenResolutionModal();
+      return;
+    }
     try {
       await updateIncidentStatus(selectedIncidentId, newStatus);
       await loadIncidents();
@@ -88,6 +100,38 @@ export default function Incidents({ machines = [], onRefreshData }) {
       if (onRefreshData) onRefreshData();
     } catch (err) {
       console.error('Error updating status:', err);
+    }
+  };
+
+  // Open Resolution Modal
+  const handleOpenResolutionModal = () => {
+    if (!details || !details.incident) return;
+    const inc = details.incident;
+    const defaultNotes = `Inspected primary mechanical components and thermal loop for ${inc.machine_name}. Replaced worn seals, recalibrated sensor threshold, and verified telemetry parameters back within baseline range.`;
+    setResolutionData({
+      resolved_by: 'Alex Chen (Senior Operations Specialist)',
+      resolution_notes: defaultNotes,
+      restore_machine: true
+    });
+    setIsResolutionModalOpen(true);
+  };
+
+  // Submit Resolution Confirmation
+  const handleConfirmResolutionSubmit = async (e) => {
+    e.preventDefault();
+    if (!selectedIncidentId) return;
+    setSubmittingResolution(true);
+    try {
+      await resolveIncident(selectedIncidentId, resolutionData);
+      await loadIncidents();
+      const res = await fetchIncidentDetails(selectedIncidentId);
+      if (res.success) setDetails(res);
+      if (onRefreshData) onRefreshData();
+      setIsResolutionModalOpen(false);
+    } catch (err) {
+      console.error('Error resolving incident:', err);
+    } finally {
+      setSubmittingResolution(false);
     }
   };
 
@@ -112,7 +156,11 @@ export default function Incidents({ machines = [], onRefreshData }) {
     setSubmittingWO(true);
     try {
       await scheduleMaintenance(workOrderData);
-      await handleStatusChange('Maintenance Scheduled');
+      await updateIncidentStatus(selectedIncidentId, 'Maintenance Scheduled');
+      await loadIncidents();
+      const res = await fetchIncidentDetails(selectedIncidentId);
+      if (res.success) setDetails(res);
+      if (onRefreshData) onRefreshData();
       setIsWorkOrderModalOpen(false);
       navigate('/maintenance');
     } catch (err) {
@@ -161,7 +209,7 @@ export default function Incidents({ machines = [], onRefreshData }) {
             AI INCIDENT INVESTIGATION
           </h1>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Investigate machine anomalies, identify possible causes and generate recommended actions
+            Investigate machine anomalies, identify root causes, execute resolutions, and persist verification logs
           </p>
         </div>
 
@@ -316,7 +364,7 @@ export default function Incidents({ machines = [], onRefreshData }) {
                     </p>
                   </div>
 
-                  {/* Status Dropdown */}
+                  {/* Status Dropdown & Actions */}
                   <div className="flex items-center space-x-2">
                     <span className="text-xs font-bold text-slate-500 dark:text-slate-400">Status:</span>
                     <select
@@ -346,7 +394,7 @@ export default function Incidents({ machines = [], onRefreshData }) {
                 {/* Sensor Snapshot Cards */}
                 <div>
                   <div className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">
-                    5. Sensor Snapshot at Incident Time
+                    Sensor Snapshot at Incident Time
                   </div>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs font-mono">
                     <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
@@ -385,7 +433,90 @@ export default function Incidents({ machines = [], onRefreshData }) {
 
               </div>
 
-              {/* 6. BEFORE vs AFTER Anomaly Impact Comparison Table */}
+              {/* Display Clear Green INCIDENT RESOLVED Details Card if status === 'Resolved' */}
+              {details.incident.status === 'Resolved' && (
+                <div className="p-6 bg-gradient-to-br from-emerald-500/10 via-slate-50 to-emerald-950/20 dark:from-emerald-950/40 dark:via-slate-900 dark:to-emerald-950/40 border border-emerald-500/40 rounded-3xl space-y-4 shadow-md animate-fade-in">
+                  
+                  <div className="flex items-center justify-between border-b border-emerald-500/20 pb-3">
+                    <div className="flex items-center space-x-3">
+                      <div className="p-2.5 rounded-2xl bg-emerald-500 text-white shadow-md">
+                        <CheckCircle2 className="w-6 h-6" />
+                      </div>
+                      <div>
+                        <h3 className="font-bold text-base text-emerald-700 dark:text-emerald-300 flex items-center gap-2">
+                          INCIDENT RESOLVED
+                        </h3>
+                        <p className="text-xs text-slate-600 dark:text-slate-400">
+                          Root cause verified and resolution workflow confirmed by technical specialist
+                        </p>
+                      </div>
+                    </div>
+
+                    <span className="px-3 py-1 text-xs font-bold font-mono rounded-full bg-emerald-500/20 text-emerald-600 dark:text-emerald-300 border border-emerald-500/40">
+                      ✓ STATUS: RESOLVED
+                    </span>
+                  </div>
+
+                  {/* Resolution Details Grid */}
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-3 text-xs font-mono">
+                    
+                    <div className="p-3.5 rounded-2xl bg-white/80 dark:bg-slate-950/80 border border-emerald-500/20 space-y-1">
+                      <div className="text-[10px] font-sans uppercase font-bold text-slate-400 flex items-center gap-1">
+                        <Calendar className="w-3 h-3 text-emerald-500" />
+                        <span>Resolution Time</span>
+                      </div>
+                      <div className="text-xs font-bold text-slate-900 dark:text-white">
+                        {details.incident.resolved_at || new Date().toLocaleString()}
+                      </div>
+                    </div>
+
+                    <div className="p-3.5 rounded-2xl bg-white/80 dark:bg-slate-950/80 border border-emerald-500/20 space-y-1">
+                      <div className="text-[10px] font-sans uppercase font-bold text-slate-400 flex items-center gap-1">
+                        <Clock className="w-3 h-3 text-emerald-500" />
+                        <span>Resolution Duration</span>
+                      </div>
+                      <div className="text-xs font-bold text-emerald-600 dark:text-emerald-400">
+                        {details.incident.resolution_duration || '12 mins'}
+                      </div>
+                    </div>
+
+                    <div className="p-3.5 rounded-2xl bg-white/80 dark:bg-slate-950/80 border border-emerald-500/20 space-y-1">
+                      <div className="text-[10px] font-sans uppercase font-bold text-slate-400 flex items-center gap-1">
+                        <UserCheck className="w-3 h-3 text-emerald-500" />
+                        <span>Resolved By</span>
+                      </div>
+                      <div className="text-xs font-bold text-slate-900 dark:text-white truncate">
+                        {details.incident.resolved_by || 'Alex Chen (Lead Specialist)'}
+                      </div>
+                    </div>
+
+                    <div className="p-3.5 rounded-2xl bg-white/80 dark:bg-slate-950/80 border border-emerald-500/20 space-y-1">
+                      <div className="text-[10px] font-sans uppercase font-bold text-slate-400 flex items-center gap-1">
+                        <CheckSquare className="w-3 h-3 text-emerald-500" />
+                        <span>Machine State</span>
+                      </div>
+                      <div className="text-xs font-bold text-emerald-600 dark:text-emerald-400">
+                        {details.machine?.status || 'Normal'}
+                      </div>
+                    </div>
+
+                  </div>
+
+                  {/* Resolution Notes Box */}
+                  <div className="p-4 rounded-2xl bg-white/90 dark:bg-slate-950/90 border border-emerald-500/30 text-xs space-y-1">
+                    <div className="font-bold text-emerald-700 dark:text-emerald-300 flex items-center gap-1.5">
+                      <FileText className="w-3.5 h-3.5" />
+                      <span>Resolution Notes & Corrective Action Taken:</span>
+                    </div>
+                    <p className="text-slate-800 dark:text-slate-200 leading-relaxed font-sans">
+                      "{details.incident.resolution_notes || 'Inspected drive shaft bearings, replaced liquid cooling loop seals, and verified operating pressure back within normal tolerance limits.'}"
+                    </p>
+                  </div>
+
+                </div>
+              )}
+
+              {/* BEFORE vs AFTER Anomaly Impact Comparison Table */}
               <div className="p-6 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl space-y-3 shadow-sm">
                 <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-2">
                   <h3 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
@@ -447,7 +578,7 @@ export default function Incidents({ machines = [], onRefreshData }) {
                 </div>
               </div>
 
-              {/* 7. AI ROOT CAUSE ANALYSIS & 8. WHY DID THIS HAPPEN */}
+              {/* AI ROOT CAUSE ANALYSIS & WHY DID THIS HAPPEN */}
               <div className="p-6 bg-gradient-to-br from-indigo-500/10 to-slate-50 dark:from-indigo-950/40 dark:to-slate-900 border border-indigo-500/30 rounded-3xl space-y-4 shadow-sm">
                 
                 <div className="flex items-center justify-between">
@@ -470,7 +601,7 @@ export default function Incidents({ machines = [], onRefreshData }) {
                   Note: {details.ai_root_cause.disclaimer}
                 </div>
 
-                {/* 8. WHY DID THIS HAPPEN */}
+                {/* WHY DID THIS HAPPEN */}
                 <div className="space-y-2 pt-2 border-t border-indigo-500/20">
                   <div className="font-bold text-xs uppercase tracking-wider text-slate-700 dark:text-slate-300">
                     WHY DID THIS HAPPEN? (Identified Risk Factors)
@@ -487,7 +618,7 @@ export default function Incidents({ machines = [], onRefreshData }) {
 
               </div>
 
-              {/* 9. POTENTIAL PRODUCTION IMPACT & COST LOSS ESTIMATION */}
+              {/* POTENTIAL PRODUCTION IMPACT & COST LOSS ESTIMATION */}
               <div className="p-6 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl space-y-4 shadow-sm">
                 <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
                   <h3 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
@@ -545,7 +676,7 @@ export default function Incidents({ machines = [], onRefreshData }) {
                 })()}
               </div>
 
-              {/* 10. AI RECOMMENDED ACTION & WORK ORDER BUTTONS */}
+              {/* AI RECOMMENDED ACTION & WORK ORDER BUTTONS */}
               <div className="p-6 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl space-y-4 shadow-sm">
                 <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
                   <h3 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
@@ -576,20 +707,25 @@ export default function Incidents({ machines = [], onRefreshData }) {
                     <span>Create Maintenance Work Order</span>
                   </button>
 
-                  {details.incident.status !== 'Resolved' && (
+                  {details.incident.status !== 'Resolved' ? (
                     <button
-                      onClick={() => handleStatusChange('Resolved')}
+                      onClick={handleOpenResolutionModal}
                       className="flex items-center space-x-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl shadow-md transition active:scale-95"
                     >
                       <CheckSquare className="w-4 h-4" />
-                      <span>Mark Investigation Complete</span>
+                      <span>Confirm Incident Resolution</span>
                     </button>
+                  ) : (
+                    <div className="flex items-center space-x-2 px-4 py-2 text-xs font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-500/30 rounded-xl">
+                      <CheckCircle2 className="w-4 h-4" />
+                      <span>Incident Resolved & Verified</span>
+                    </div>
                   )}
                 </div>
 
               </div>
 
-              {/* 12. INCIDENT TIMELINE */}
+              {/* INCIDENT TIMELINE */}
               <div className="p-6 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl space-y-4 shadow-sm">
                 <h3 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
                   <Clock className="w-4 h-4 text-blue-500" />
@@ -613,6 +749,86 @@ export default function Incidents({ machines = [], onRefreshData }) {
         </div>
 
       </div>
+
+      {/* Resolution Confirmation Modal */}
+      {isResolutionModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in">
+          <div className="relative w-full max-w-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-2xl space-y-4 text-slate-900 dark:text-white">
+            <h2 className="text-lg font-bold flex items-center gap-2 text-emerald-600 dark:text-emerald-400">
+              <CheckCircle2 className="w-5 h-5" />
+              Confirm Incident Resolution
+            </h2>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Record completion of technical inspection and verify machine status update for Incident #{details?.incident?.id}
+            </p>
+
+            <form onSubmit={handleConfirmResolutionSubmit} className="space-y-3.5 text-xs">
+              <div>
+                <label className="block font-semibold mb-1">Target Machine & Anomaly</label>
+                <input
+                  type="text"
+                  disabled
+                  value={`${details?.incident?.machine_name} (${details?.incident?.machine_id}) — ${details?.incident?.anomaly_type}`}
+                  className="w-full bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-2 text-slate-700 dark:text-slate-300 font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold mb-1">Resolved By / Responsible User</label>
+                <input
+                  type="text"
+                  value={resolutionData.resolved_by}
+                  onChange={(e) => setResolutionData({ ...resolutionData, resolved_by: e.target.value })}
+                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-2 text-slate-900 dark:text-white focus:outline-none focus:border-emerald-500"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold mb-1">Resolution Notes & Corrective Actions</label>
+                <textarea
+                  rows={3}
+                  value={resolutionData.resolution_notes}
+                  onChange={(e) => setResolutionData({ ...resolutionData, resolution_notes: e.target.value })}
+                  placeholder="Describe corrective actions taken..."
+                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-2 text-slate-900 dark:text-white focus:outline-none focus:border-emerald-500"
+                  required
+                />
+              </div>
+
+              <div className="flex items-center space-x-2 pt-1">
+                <input
+                  type="checkbox"
+                  id="restoreMachine"
+                  checked={resolutionData.restore_machine}
+                  onChange={(e) => setResolutionData({ ...resolutionData, restore_machine: e.target.checked })}
+                  className="w-4 h-4 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500"
+                />
+                <label htmlFor="restoreMachine" className="text-xs text-slate-700 dark:text-slate-300 cursor-pointer">
+                  Restore target machine telemetry to Normal operating baseline
+                </label>
+              </div>
+
+              <div className="pt-3 flex justify-end space-x-2 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setIsResolutionModalOpen(false)}
+                  className="px-4 py-2 text-xs font-semibold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-xl"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={submittingResolution}
+                  className="px-5 py-2 text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl shadow-md transition"
+                >
+                  {submittingResolution ? 'Confirming Resolution...' : 'Confirm Resolution'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Pre-filled Work Order Modal */}
       {isWorkOrderModalOpen && (

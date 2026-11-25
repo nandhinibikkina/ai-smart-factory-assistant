@@ -17,15 +17,16 @@ BASELINES = {
     "MCH-006": {"temp": 52.4, "vib": 0.8, "press": 91.5, "eff": 97.5, "hours": 650.0}
 }
 
-def inject_machine_anomaly(machine_id="MCH-003", anomaly_type="Combined Anomaly"):
+def inject_machine_anomaly(machine_id="MCH-003", anomaly_type="Combined Anomaly", severity=None):
     """
     Injects simulated anomaly into ANY machine in the fleet.
+    Severity can be explicitly selected as 'Warning' or 'Critical'.
     Anomaly Types:
-      - 'High Temperature' / 'high_temperature'
-      - 'High Vibration' / 'high_vibration'
-      - 'Abnormal Pressure' / 'abnormal_pressure'
-      - 'Increasing Trend' / 'increasing_trend'
-      - 'Combined Anomaly' / 'combined_anomaly'
+      - 'High Temperature' / 'Abnormal Temperature'
+      - 'High Vibration' / 'Abnormal Vibration'
+      - 'Abnormal Pressure'
+      - 'Increasing Trend'
+      - 'Combined Anomaly'
     """
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -48,46 +49,95 @@ def inject_machine_anomaly(machine_id="MCH-003", anomaly_type="Combined Anomaly"
     target_id = m['id']
     machine_name = m['name']
     
-    # Compute parameter values based on anomaly_type
+    # Normalize selected severity
+    target_severity = 'Critical'
+    if severity:
+        sev_str = str(severity).strip().capitalize()
+        if sev_str in ['Warning', 'Critical']:
+            target_severity = sev_str
+    
+    # Compute parameter values based on anomaly_type & target_severity
     atype = str(anomaly_type).lower().replace('_', ' ').strip()
     trend_dict = None
     
     if "temperature" in atype or "temp" in atype:
-        temp = round(random.uniform(89.5, 94.0), 1)
-        vib = round(random.uniform(2.0, 2.8), 2)
-        press = round(random.uniform(98.0, 104.0), 1)
-        title = "Thermal Overheat Anomaly"
-        desc = f"HIGH TEMPERATURE ANOMALY DETECTED: Thermal sensor reads {temp}°C (Safety limit: 85.0°C)."
+        if target_severity == 'Warning':
+            temp = round(random.uniform(78.5, 82.0), 1)
+            vib = round(random.uniform(2.0, 2.5), 2)
+            press = round(random.uniform(98.0, 104.0), 1)
+            title = "Elevated Temperature Warning Anomaly"
+            desc = f"WARNING: Thermal sensor reads {temp}°C (Warning limit: 75.0°C)."
+        else:
+            temp = round(random.uniform(89.5, 94.0), 1)
+            vib = round(random.uniform(2.0, 2.8), 2)
+            press = round(random.uniform(98.0, 104.0), 1)
+            title = "Thermal Overheat Anomaly"
+            desc = f"CRITICAL: Thermal sensor reads {temp}°C (Safety limit: 85.0°C)."
     elif "vibration" in atype or "vib" in atype:
-        temp = round(random.uniform(68.0, 74.0), 1)
-        vib = round(random.uniform(6.8, 7.8), 2)
-        press = round(random.uniform(96.0, 102.0), 1)
-        title = "Excessive Shaft Vibration Anomaly"
-        desc = f"HIGH VIBRATION ANOMALY DETECTED: Drive shaft vibration reads {vib} mm/s (Tolerance limit: 5.5 mm/s)."
+        if target_severity == 'Warning':
+            temp = round(random.uniform(64.0, 70.0), 1)
+            vib = round(random.uniform(3.8, 4.8), 2)
+            press = round(random.uniform(96.0, 102.0), 1)
+            title = "Elevated Shaft Vibration Warning"
+            desc = f"WARNING: Drive shaft vibration reads {vib} mm/s (Warning limit: 3.5 mm/s)."
+        else:
+            temp = round(random.uniform(68.0, 74.0), 1)
+            vib = round(random.uniform(6.8, 7.8), 2)
+            press = round(random.uniform(96.0, 102.0), 1)
+            title = "Excessive Shaft Vibration Anomaly"
+            desc = f"CRITICAL: Drive shaft vibration reads {vib} mm/s (Tolerance limit: 5.5 mm/s)."
     elif "pressure" in atype or "press" in atype:
-        temp = round(random.uniform(72.0, 78.0), 1)
-        vib = round(random.uniform(2.5, 3.4), 2)
-        press = round(random.uniform(134.0, 142.0), 1)
-        title = "Pneumatic Pressure Spike Anomaly"
-        desc = f"ABNORMAL PRESSURE DETECTED: Line pressure reads {press} PSI (Operating limit: 125.0 PSI)."
+        if target_severity == 'Warning':
+            temp = round(random.uniform(68.0, 74.0), 1)
+            vib = round(random.uniform(2.2, 3.0), 2)
+            press = round(random.uniform(116.0, 124.0), 1)
+            title = "Pneumatic Pressure Fluctuation Warning"
+            desc = f"WARNING: Line pressure reads {press} PSI (Warning threshold: 115.0 PSI)."
+        else:
+            temp = round(random.uniform(72.0, 78.0), 1)
+            vib = round(random.uniform(2.5, 3.4), 2)
+            press = round(random.uniform(134.0, 142.0), 1)
+            title = "Pneumatic Pressure Spike Anomaly"
+            desc = f"CRITICAL: Line pressure reads {press} PSI (Operating limit: 125.0 PSI)."
     elif "trend" in atype:
-        temp = round(random.uniform(82.5, 86.0), 1)
-        vib = round(random.uniform(4.8, 5.6), 2)
-        press = round(random.uniform(118.0, 126.0), 1)
-        trend_dict = {"temp_increasing": True, "vib_increasing": True}
-        title = "Continuous Parameter Upward Trend"
-        desc = f"INCREASING TREND DETECTED: Continuous upward drift in Temperature ({temp}°C) and Vibration ({vib} mm/s)."
+        if target_severity == 'Warning':
+            temp = round(random.uniform(76.0, 79.0), 1)
+            vib = round(random.uniform(3.5, 4.2), 2)
+            press = round(random.uniform(114.0, 120.0), 1)
+            trend_dict = {"temp_increasing": True, "vib_increasing": True}
+            title = "Parameter Upward Trend Warning"
+            desc = f"WARNING: Moderate upward drift in Temperature ({temp}°C) and Vibration ({vib} mm/s)."
+        else:
+            temp = round(random.uniform(88.5, 93.0), 1)
+            vib = round(random.uniform(6.0, 7.2), 2)
+            press = round(random.uniform(128.0, 136.0), 1)
+            trend_dict = {"temp_increasing": True, "vib_increasing": True}
+            title = "Continuous Parameter Upward Trend"
+            desc = f"CRITICAL: Continuous upward drift in Temperature ({temp}°C) and Vibration ({vib} mm/s)."
     else: # Combined Anomaly
-        temp = round(random.uniform(90.0, 95.0), 1)
-        vib = round(random.uniform(6.8, 7.9), 2)
-        press = round(random.uniform(132.0, 140.0), 1)
-        title = "Critical Multi-Sensor Anomaly"
-        desc = f"COMBINED CRITICAL ANOMALY: Temperature ({temp}°C), Vibration ({vib} mm/s), and Pressure ({press} PSI) exceed safety tolerances."
+        if target_severity == 'Warning':
+            temp = round(random.uniform(78.0, 82.0), 1)
+            vib = round(random.uniform(3.8, 4.5), 2)
+            press = round(random.uniform(118.0, 124.0), 1)
+            title = "Combined Parameter Warning Anomaly"
+            desc = f"WARNING: Temperature ({temp}°C), Vibration ({vib} mm/s), and Pressure ({press} PSI) approaching limits."
+        else:
+            temp = round(random.uniform(90.0, 95.0), 1)
+            vib = round(random.uniform(6.8, 7.9), 2)
+            press = round(random.uniform(132.0, 140.0), 1)
+            title = "Critical Multi-Sensor Anomaly"
+            desc = f"CRITICAL: Temperature ({temp}°C), Vibration ({vib} mm/s), and Pressure ({press} PSI) exceed safety tolerances."
 
     diag = predict_machine_risk(temp, vib, press, m['operating_hours'], trend_dict)
-    status = diag['status']
-    risk_score = diag['risk_score'] # 0 to 100
-    eff = round(max(55.0, m['efficiency'] - 20.0), 1)
+    
+    # Enforce exact selected severity
+    status = target_severity
+    if target_severity == 'Warning':
+        risk_score = min(68, max(42, diag['risk_score']))
+    else:
+        risk_score = min(99, max(75, diag['risk_score']))
+
+    eff = round(max(55.0, m['efficiency'] - (15.0 if status == 'Warning' else 25.0)), 1)
 
     cursor.execute('''
         UPDATE machines
@@ -108,9 +158,9 @@ def inject_machine_anomaly(machine_id="MCH-003", anomaly_type="Combined Anomaly"
     cursor.execute('''
         INSERT INTO alerts (machine_id, machine_name, severity, title, description, recommendation, status, timestamp)
         VALUES (?, ?, ?, ?, ?, ?, 'Active', datetime('now'))
-    ''', (target_id, machine_name, 'Critical' if status == 'Critical' else 'Warning', title, desc, rec_str))
+    ''', (target_id, machine_name, status, title, desc, rec_str))
 
-    # Auto-create or update AI Incident Investigation Record
+    # Auto-create or update AI Incident Investigation Record with stable incident ID
     m_num = target_id.split('-')[-1] if '-' in target_id else '001'
     incident_id = f"INC-{m_num}"
     base = BASELINES.get(target_id, {"temp": 65.0, "vib": 1.8, "press": 100.0})
@@ -124,13 +174,12 @@ def inject_machine_anomaly(machine_id="MCH-003", anomaly_type="Combined Anomaly"
         ) VALUES (?, ?, ?, ?, ?, ?, 'Investigation Required', ?, ?, ?, ?, ?, ?, ?, 'High', datetime('now'))
     ''', (
         incident_id, target_id, machine_name, anomaly_type,
-        'Critical' if status == 'Critical' else 'Warning',
-        risk_score, base['temp'], temp, base['vib'], vib, base['press'], press,
+        status, risk_score, base['temp'], temp, base['vib'], vib, base['press'], press,
         title
     ))
 
     cursor.execute("INSERT INTO activity_logs (type, machine_name, message) VALUES ('Alert', ?, ?)",
-                   (machine_name, f"Anomaly Injected ({anomaly_type}): {title} (Incident #{incident_id} Created)"))
+                   (machine_name, f"Anomaly Injected ({anomaly_type} - {status}): {title} (Incident #{incident_id} Created)"))
     
     conn.commit()
     conn.close()
@@ -139,6 +188,7 @@ def inject_machine_anomaly(machine_id="MCH-003", anomaly_type="Combined Anomaly"
         "machine_id": target_id,
         "machine_name": machine_name,
         "anomaly_type": anomaly_type,
+        "severity": status,
         "temperature": temp,
         "vibration": vib,
         "pressure": press,
